@@ -160,7 +160,7 @@ define ds_389::instance (
 
   file { "${instance_path}/pin.txt":
     ensure    => file,
-    mode      => '0440',
+    mode      => '0400',
     owner     => $user,
     group     => $group,
     content   => "Internal (Software) Token:${root_dn_pass}\n",
