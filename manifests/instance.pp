@@ -198,7 +198,7 @@ define ds_389::instance (
       command     => "openssl pkcs12 -export -password pass:${cert_db_pass} -name ${server_host} -in ${ds_389::ssl_dir}/${server_id}-bundle.pem -out ${ds_389::ssl_dir}/${server_id}.p12", # lint:ignore:140chars
       path        => $ds_389::path,
       refreshonly => true,
-      notify      => Exec["Create cert DB: ${server_id}"],
+      notify      => Exec["Create cert DB: ${server_id}","Create temp file: ${server_id}"],
     }
 
     exec { "Create cert DB: ${server_id}":
@@ -208,9 +208,17 @@ define ds_389::instance (
       before      => Exec["Add trust for server cert: ${server_id}"],
     }
 
+    # Create temp file
+    $temp_pass_file = "/tmp/passfile-${server_id}"
+    exec { "Create temp file: ${server_id}":
+      command     => "echo ${root_dn_pass} > ${temp_pass_file}",
+      path        => $ds_389::path,
+      refreshonly => true,
+    }
+
     $ssl['ca_cert_names'].each |$index, $cert_name| {
       exec { "Add trust for CA${index}: ${server_id}":
-        command => "certutil -M -n \"${cert_name}\" -t CT,, -d ${instance_path}",
+        command => "certutil -M -n \"${cert_name}\" -t CT,, -d ${instance_path} -f ${temp_pass_file}",
         path    => $ds_389::path,
         unless  => "certutil -L -d ${instance_path} | grep \"${cert_name}\" | grep \"CT\"",
         require => Exec["Create cert DB: ${server_id}"],
@@ -222,6 +230,7 @@ define ds_389::instance (
         command => "certutil -d ${instance_path} -L -n \"${cert_name}\" -a > ${server_id}CA${index}.pem",
         path    => $ds_389::path,
         creates => "${instance_path}/${server_id}CA${index}.pem",
+        notify  => Exec["Cleanup temp file: ${server_id}"],
       }
       # - copy ca certs to openldap
       file { "${ds_389::cacerts_path}/${server_id}CA${index}.pem":
@@ -234,11 +243,19 @@ define ds_389::instance (
 
     $ssl_cert_name = $ssl['cert_name']
     exec { "Add trust for server cert: ${server_id}":
-      command => "certutil -M -n \"${ssl['cert_name']}\" -t u,u,u -d ${instance_path}",
+      command => "certutil -M -n \"${ssl['cert_name']}\" -t u,u,u -d ${instance_path} -f ${temp_pass_file}",
       path    => $ds_389::path,
       unless  => "certutil -L -d ${instance_path} | grep \"${ssl['cert_name']}\" | grep \"u,u,u\"",
-      notify  => Exec["Export server cert: ${server_id}"],
+      notify  => Exec["Export server cert: ${server_id}","Cleanup temp file: ${server_id}"],
     }
+
+    # Cleanup temp file
+    exec { "Cleanup temp file: ${server_id}":
+      command     => "rm -f ${temp_pass_file}",
+      path        => $ds_389::path,
+      refreshonly => true,
+    }
+
   }
 
   # Otherwise gen certs and add to db.
